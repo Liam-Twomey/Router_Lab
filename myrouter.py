@@ -78,17 +78,20 @@ class Router(object):
         self.layer2_forward_list = []# Stores ArpPending objects
         self.forwarding_table = None   # Change this if you want to!
 
+        self.forwarding_table = pd.read_csv('forwarding_table.txt', sep=' ', names=['net_prefix', 'net_mask','next_hop', 'my_port_name'])
+        self.forwarding_table['type'] = 'net'
+        self.forwarding_table['net'] = self.forwarding_table.apply(lambda x: 
+            IPv4Interface((x['net_prefix'], x['net_mask'])),axis=1)
+        self.forwarding_table['next_hop'] = self.forwarding_table['next_hop'].apply(lambda x: IPv4Network(x))
+
         for intf in net.interfaces():
             self.interfaces[intf.name] = intf
             self.mymacs.add(intf.ethaddr)
             for ipaddr in intf.ipaddrs:
                 self.arptable[ipaddr] = intf.ethaddr
                 self.myips.add(ipaddr)
+                self.forwarding_table = self.forwarding_table.append({'net_prefix':ipaddr,'net_mask':'255.255.255.255','next_hop':'0.0.0.0','my_port_name':intf.name, 'type':'addr','net':ipaddr.ip}, ignore_index=True)
 
-        self.forwarding_table = pd.read_csv('forwarding_table.txt', sep=' ', names=['net_prefix', 'net_mask','next_hop', 'my_port_name'])
-        self.forwarding_table['net'] = self.forwarding_table.apply(lambda x: 
-            IPv4Network((x['net_prefix'], x['net_mask'])),axis=1)
-        self.forwarding_table['next_hop'] = self.forwarding_table['next_hop'].apply(lambda x: IPv4Address(x))
 
         # *** You will need to add more code to this constructor ***
 
@@ -150,20 +153,18 @@ class Router(object):
                     ip_hdr.ttl -= 1 #decrement the ip header ttl
                     #find next hop
                     dst = ip_hdr.dst                     
-                    next_hop = self.get_nextHop(dst)
+                    breakpoint()
+                    next_hop = self.find_most_precise(dst, 'next_hop')
+                    breakpoint()
                     #strip ethernet header
                     eth_ind = pkt.get_header_index(Ethernet)
                     pkt_stripped = deepcopy(pkt)
                     del pkt_stripped[eth_ind]
                     #get the destination port interface
-                    matched_net = self.forwarding_table.loc[self.forwarding_table['net'].apply(lambda x: dst in x)]
-                    big_BoI = matched_net['net'].apply(lambda x: x.prefixlen).argmin()
-                    most_general_net = matched_net.loc[big_BoI, 'net']
-                    breakpoint()
-                    out_port = self.arptable[IPv4Interface(most_general_net)]
-                    breakpoint()
+                    out_port = self.find_most_precise(dst, 'my_port_name')
                     #assemble arp pending
-                    arppending = ArpPending(most_general_net, next_hop, pkt_stripped)
+                    breakpoint()
+                    arppending = ArpPending(out_port, next_hop, pkt_stripped)
                     self.layer2_forward_list.append(arppending)
                     self.process_arp_pending()
                 else:
@@ -173,14 +174,17 @@ class Router(object):
             else:
                 log_warn("Received Non-IP packet that I don't know how to handle: {}".format(str(pkt)))
 
-    def get_nextHop(self, ip_dst):
-        #OUR METHOD!!!!!
-        #looks up the next hop for a given ip dst in the forwarding table
-        #self.forwarding_table.apply(lambda x: x['dst'] & x['mask'], axis=1)
-        matched_entries = self.forwarding_table.loc[(self.forwarding_table['net'].apply(lambda x: ip_dst in x))]
-        largest_net_i = matched_entries['net'].apply(lambda x: x.prefixlen).argmax()
-        result = matched_entries.loc[largest_net_i, 'next_hop']
-        return result
+    def find_most_precise(self, dst, col):
+        ipaddrs = self.forwarding_table.loc[self.forwarding_table['type']=='ipaddr']
+        if len(ipaddrs) > 1:
+            matched_addr = (ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]).iloc[0][col]
+        else:
+            nets = self.forwarding_table.loc[self.forwarding_table['type']=='net']
+            breakpoint()
+            matched_nets = nets.loc[nets['net'].apply(lambda x: dst in x)]
+            big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
+            most_precise_match = matched_nets.iloc[big_BoI][col]
+        return most_precise_match
 
     def layer2_forward(self, egress, mac_dst, pkt, xtype=IPv4):
         #OUR METHOD!!!!!
@@ -188,7 +192,6 @@ class Router(object):
         #pkt += Ethernet()
         pkt.prepend_header(Ethernet(dst=mac_dst, ethertype=xtype, src=self.interfaces[egress].ethaddr))
         eth_hdr = pkt.get_header(Ethernet)
-        breakpoint()
         self.net.send_packet(self.interfaces[egress].ethaddr, pkt)
         
     def process_arp_pending(self):
@@ -219,7 +222,6 @@ class Router(object):
                 dstmac = self.arptable[thisarp.nexthop]
                 log_info("Already have MAC address for {}->{} - don't need to ARP".format(thisarp.nexthop, dstmac))
                 # **NOTE: you will need to provide an implementation of layer2_forward
-                breakpoint()
                 self.layer2_forward(thisarp.egress_dev, dstmac, thisarp.pkt)
             else:
                 # Not in ARP table, so send ARP request if we haven't timed out.
@@ -231,7 +233,6 @@ class Router(object):
                     thisarp.add_attempt()
 
                     # **NOTE: you will need to provide an implementation of layer2_forward
-                    breakpoint()
                     self.layer2_forward(thisarp.egress_dev, "ff:ff:ff:ff:ff:ff",
                                         p, xtype=EtherType.ARP)
                     newlist.append(thisarp)
