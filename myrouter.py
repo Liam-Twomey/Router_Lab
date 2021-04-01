@@ -79,7 +79,6 @@ class Router(object):
         self.forwarding_table = None   # Change this if you want to!
 
         self.forwarding_table = pd.read_csv('forwarding_table.txt', sep=' ', names=['net_prefix', 'net_mask','next_hop', 'my_port_name'])
-        self.forwarding_table['type'] = 'net'
         self.forwarding_table['net'] = self.forwarding_table.apply(lambda x: 
             IPv4Network((x['net_prefix'], x['net_mask'])),axis=1)
         self.forwarding_table['next_hop'] = self.forwarding_table['next_hop'].apply(lambda x: IPv4Address(x))
@@ -90,7 +89,7 @@ class Router(object):
             for ipaddr in intf.ipaddrs:
                 self.arptable[ipaddr] = intf.ethaddr
                 self.myips.add(ipaddr)
-                self.forwarding_table = self.forwarding_table.append({'net_prefix':ipaddr,'net_mask':'255.255.255.255','next_hop':IPv4Address('0.0.0.0'),'my_port_name':intf.name, 'type':'addr','net':ipaddr.network}, ignore_index=True)
+                self.forwarding_table = self.forwarding_table.append({'net_prefix':ipaddr,'net_mask':'255.255.255.255','next_hop':IPv4Address('0.0.0.0'),'my_port_name':intf.name,'net':ipaddr.network}, ignore_index=True)
 
 
         # *** You will need to add more code to this constructor ***
@@ -153,12 +152,10 @@ class Router(object):
                     ip_hdr.ttl -= 1 #decrement the ip header ttl
                     #find next hop
                     dst = ip_hdr.dst                     
-                    breakpoint()
                     next_hop = self.find_most_precise(dst, 'next_hop')
                     #handle case on our net
                     if next_hop == IPv4Address('0.0.0.0'):
                         next_hop = dst
-                        breakpoint()
                     #strip ethernet header
                     eth_ind = pkt.get_header_index(Ethernet)
                     pkt_stripped = deepcopy(pkt)
@@ -166,7 +163,6 @@ class Router(object):
                     #get the destination port interface
                     out_port = self.find_most_precise(dst, 'my_port_name')
                     #assemble arp pending
-                    breakpoint()
                     arppending = ArpPending(out_port, next_hop, pkt_stripped)
                     self.layer2_forward_list.append(arppending)
                     self.process_arp_pending()
@@ -178,6 +174,8 @@ class Router(object):
                 log_warn("Received Non-IP packet that I don't know how to handle: {}".format(str(pkt)))
 
     def find_most_precise(self, dst, col):
+        #this returns the most specific net containing dst.
+        #It then accesses the col specified
         matched_nets = self.forwarding_table.loc[self.forwarding_table['net'].apply(lambda x: dst in x)]
         big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
         most_precise_match = matched_nets.iloc[big_BoI][col]
@@ -185,13 +183,11 @@ class Router(object):
 
    # def find_most_precise(self, dst, col):
    #     ipaddrs = self.forwarding_table.loc[self.forwarding_table['type']=='addr']
-   #     breakpoint()
    #     if len(ipaddrs) > 1:
    #         intermediate = ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]
    #         matched_addr = (ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]).iloc[0][col]
    #     else:
    #         nets = self.forwarding_table.loc[self.forwarding_table['type']=='net']
-   #         breakpoint()
    #         matched_nets = nets.loc[nets['net'].apply(lambda x: dst in x)]
    #         big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
    #         most_precise_match = matched_nets.iloc[big_BoI][col]
