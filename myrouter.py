@@ -197,7 +197,7 @@ class Router(object):
    #         most_precise_match = matched_nets.iloc[big_BoI][col]
    #     return most_precise_match
 
-    def layer2_forward(self, egress, mac_dst, pkt, xtype=IPv4):
+    def layer2_forward(self, egress, mac_dst, pkt, xtype=EtherType.IPv4):
         #OUR METHOD!!!!!
         #note ttl is decremented coming in
         #pkt += Ethernet()
