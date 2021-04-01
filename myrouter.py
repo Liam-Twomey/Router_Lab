@@ -81,8 +81,8 @@ class Router(object):
         self.forwarding_table = pd.read_csv('forwarding_table.txt', sep=' ', names=['net_prefix', 'net_mask','next_hop', 'my_port_name'])
         self.forwarding_table['type'] = 'net'
         self.forwarding_table['net'] = self.forwarding_table.apply(lambda x: 
-            IPv4Interface((x['net_prefix'], x['net_mask'])),axis=1)
-        self.forwarding_table['next_hop'] = self.forwarding_table['next_hop'].apply(lambda x: IPv4Network(x))
+            IPv4Network((x['net_prefix'], x['net_mask'])),axis=1)
+        self.forwarding_table['next_hop'] = self.forwarding_table['next_hop'].apply(lambda x: IPv4Address(x))
 
         for intf in net.interfaces():
             self.interfaces[intf.name] = intf
@@ -90,7 +90,7 @@ class Router(object):
             for ipaddr in intf.ipaddrs:
                 self.arptable[ipaddr] = intf.ethaddr
                 self.myips.add(ipaddr)
-                self.forwarding_table = self.forwarding_table.append({'net_prefix':ipaddr,'net_mask':'255.255.255.255','next_hop':'0.0.0.0','my_port_name':intf.name, 'type':'addr','net':ipaddr.ip}, ignore_index=True)
+                self.forwarding_table = self.forwarding_table.append({'net_prefix':ipaddr,'net_mask':'255.255.255.255','next_hop':IPv4Address('0.0.0.0'),'my_port_name':intf.name, 'type':'addr','net':ipaddr.network}, ignore_index=True)
 
 
         # *** You will need to add more code to this constructor ***
@@ -155,7 +155,10 @@ class Router(object):
                     dst = ip_hdr.dst                     
                     breakpoint()
                     next_hop = self.find_most_precise(dst, 'next_hop')
-                    breakpoint()
+                    #handle case on our net
+                    if next_hop == IPv4Address('0.0.0.0'):
+                        next_hop = dst
+                        breakpoint()
                     #strip ethernet header
                     eth_ind = pkt.get_header_index(Ethernet)
                     pkt_stripped = deepcopy(pkt)
@@ -175,16 +178,24 @@ class Router(object):
                 log_warn("Received Non-IP packet that I don't know how to handle: {}".format(str(pkt)))
 
     def find_most_precise(self, dst, col):
-        ipaddrs = self.forwarding_table.loc[self.forwarding_table['type']=='ipaddr']
-        if len(ipaddrs) > 1:
-            matched_addr = (ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]).iloc[0][col]
-        else:
-            nets = self.forwarding_table.loc[self.forwarding_table['type']=='net']
-            breakpoint()
-            matched_nets = nets.loc[nets['net'].apply(lambda x: dst in x)]
-            big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
-            most_precise_match = matched_nets.iloc[big_BoI][col]
+        matched_nets = self.forwarding_table.loc[self.forwarding_table['net'].apply(lambda x: dst in x)]
+        big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
+        most_precise_match = matched_nets.iloc[big_BoI][col]
         return most_precise_match
+
+   # def find_most_precise(self, dst, col):
+   #     ipaddrs = self.forwarding_table.loc[self.forwarding_table['type']=='addr']
+   #     breakpoint()
+   #     if len(ipaddrs) > 1:
+   #         intermediate = ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]
+   #         matched_addr = (ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]).iloc[0][col]
+   #     else:
+   #         nets = self.forwarding_table.loc[self.forwarding_table['type']=='net']
+   #         breakpoint()
+   #         matched_nets = nets.loc[nets['net'].apply(lambda x: dst in x)]
+   #         big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
+   #         most_precise_match = matched_nets.iloc[big_BoI][col]
+   #     return most_precise_match
 
     def layer2_forward(self, egress, mac_dst, pkt, xtype=IPv4):
         #OUR METHOD!!!!!
@@ -192,7 +203,7 @@ class Router(object):
         #pkt += Ethernet()
         pkt.prepend_header(Ethernet(dst=mac_dst, ethertype=xtype, src=self.interfaces[egress].ethaddr))
         eth_hdr = pkt.get_header(Ethernet)
-        self.net.send_packet(self.interfaces[egress].ethaddr, pkt)
+        self.net.send_packet(egress, pkt)
         
     def process_arp_pending(self):
         '''
