@@ -151,7 +151,7 @@ class Router(object):
                 if ip_hdr.ttl > 0:
                     ip_hdr.ttl -= 1 #decrement the ip header ttl
                     #find next hop
-                    dst = ip_hdr.dst                     
+                    dst = ip_hdr.dst
                     next_hop = self.find_most_precise(dst, 'next_hop')
                     #handle case on our net
                     if next_hop == IPv4Address('0.0.0.0'):
@@ -216,7 +216,12 @@ class Router(object):
         now = time.time()
         log_info("Processing outstanding packets to be ARPed at {}".format(now))
         newlist = []
+        #~Debug
+        counter = 0
         while len(self.layer2_forward_list):
+            #~Debug
+            log_info(f'i = {counter}')
+            log_info(f'current layer2_forward_list = {self.layer2_forward_list}')
             thisarp = self.layer2_forward_list.pop(0)
             log_debug("Checking {}".format(str(thisarp)))
             log_debug("Current arp table: {}".format(str(self.arptable)))
@@ -243,6 +248,8 @@ class Router(object):
                     self.layer2_forward(thisarp.egress_dev, "ff:ff:ff:ff:ff:ff",
                                         p, xtype=EtherType.ARP)
                     newlist.append(thisarp)
+                    #~Debug
+                    counter +=1
                 elif thisarp.giveup(now):
                     log_warn("Giving up on ARPing {}".format(str(thisarp.nexthop)))
 
