@@ -128,6 +128,8 @@ class Router(object):
 
             except NoPackets:
                 log_debug("Timeout waiting for packets")
+                #REALLY SCARED, THIS SEEMS TO UNDERMINE WHAT DAVIS WAS TRYING TO GET US TO DO
+                self.process_arp_pending()
                 continue
 
             except Shutdown:
@@ -163,9 +165,10 @@ class Router(object):
                     #get the destination port interface
                     out_port = self.find_most_precise(dst, 'my_port_name')
                     #assemble arp pending
-                    arppending = ArpPending(out_port, next_hop, pkt_stripped)
-                    self.layer2_forward_list.append(arppending)
-                    self.process_arp_pending()
+                    if out_port and next_hop:
+                        arppending = ArpPending(out_port, next_hop, pkt_stripped)
+                        self.layer2_forward_list.append(arppending)
+                        self.process_arp_pending()
                 else:
                     #ideally respond with ICMP ttl expired, but not within scope of project
                     pass 
@@ -177,21 +180,12 @@ class Router(object):
         #this returns the most specific net containing dst.
         #It then accesses the col specified
         matched_nets = self.forwarding_table.loc[self.forwarding_table['net'].apply(lambda x: dst in x)]
+        if matched_nets.empty:
+            return None
+        breakpoint()
         big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
         most_precise_match = matched_nets.iloc[big_BoI][col]
         return most_precise_match
-
-   # def find_most_precise(self, dst, col):
-   #     ipaddrs = self.forwarding_table.loc[self.forwarding_table['type']=='addr']
-   #     if len(ipaddrs) > 1:
-   #         intermediate = ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]
-   #         matched_addr = (ipaddrs.loc[ipaddrs['net'].apply(lambda x: dst == x)]).iloc[0][col]
-   #     else:
-   #         nets = self.forwarding_table.loc[self.forwarding_table['type']=='net']
-   #         matched_nets = nets.loc[nets['net'].apply(lambda x: dst in x)]
-   #         big_BoI = matched_nets['net'].apply(lambda x: x.prefixlen).argmax()
-   #         most_precise_match = matched_nets.iloc[big_BoI][col]
-   #     return most_precise_match
 
     def layer2_forward(self, egress, mac_dst, pkt, xtype=EtherType.IPv4):
         #OUR METHOD!!!!!
@@ -225,7 +219,6 @@ class Router(object):
             thisarp = self.layer2_forward_list.pop(0)
             log_debug("Checking {}".format(str(thisarp)))
             log_debug("Current arp table: {}".format(str(self.arptable)))
-            log_debug
 
             dstmac = None
             # Check: do we already know the MAC address? If so, go ahead and forward 
@@ -252,7 +245,6 @@ class Router(object):
                     counter +=1
                 elif thisarp.giveup(now):
                     log_warn("Giving up on ARPing {}".format(str(thisarp.nexthop)))
-
         self.layer2_forward_list = newlist
 
     def make_arp_request(self, hwsrc, ipsrc, ipdst):
